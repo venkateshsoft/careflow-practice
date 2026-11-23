@@ -1,0 +1,103 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  ADMIN
+  PROVIDER
+  CLINICAL_STAFF
+  RECEPTIONIST
+  BILLING
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  CHECKED_IN
+  COMPLETED
+  CANCELLED
+}
+
+model Practice {
+  id        String      @id @default(cuid())
+  name      String
+  timezone  String      @default("America/New_York")
+  createdAt DateTime    @default(now())
+  users     User[]
+  providers Provider[]
+  patients  Patient[]
+  appointments Appointment[]
+  auditEvents AuditEvent[]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  displayName  String
+  role         Role
+  active       Boolean  @default(true)
+  practiceId   String
+  practice     Practice @relation(fields: [practiceId], references: [id])
+  auditEvents  AuditEvent[]
+  createdAt    DateTime @default(now())
+}
+
+model Provider {
+  id           String   @id @default(cuid())
+  displayName  String
+  specialty    String
+  credential   String
+  active       Boolean  @default(true)
+  practiceId   String
+  practice     Practice @relation(fields: [practiceId], references: [id])
+  appointments Appointment[]
+}
+
+model Patient {
+  id           String   @id @default(cuid())
+  mrn          String   @unique
+  firstName    String
+  lastName     String
+  dateOfBirth  DateTime
+  phone        String
+  status       String   @default("ACTIVE")
+  practiceId   String
+  practice     Practice @relation(fields: [practiceId], references: [id])
+  appointments Appointment[]
+  createdAt    DateTime @default(now())
+}
+
+model Appointment {
+  id          String   @id @default(cuid())
+  startsAt    DateTime
+  durationMin Int      @default(30)
+  visitType   String
+  status      AppointmentStatus @default(SCHEDULED)
+  patientId   String
+  patient     Patient  @relation(fields: [patientId], references: [id])
+  providerId  String
+  provider    Provider @relation(fields: [providerId], references: [id])
+  practiceId  String
+  practice    Practice @relation(fields: [practiceId], references: [id])
+  createdAt   DateTime @default(now())
+  @@index([practiceId, startsAt])
+}
+
+model AuditEvent {
+  id         String   @id @default(cuid())
+  action     String
+  entityType String
+  entityId   String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  actorId    String?
+  actor      User?    @relation(fields: [actorId], references: [id])
+  practiceId String
+  practice   Practice @relation(fields: [practiceId], references: [id])
+  @@index([practiceId, createdAt])
+}
