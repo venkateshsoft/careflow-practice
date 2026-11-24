@@ -1,3 +1,4 @@
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -66,6 +67,44 @@ enum PaymentStatus {
   VOIDED
 }
 
+enum InsuranceClaimStatus {
+  DRAFT
+  SUBMITTED
+  PARTIALLY_ADJUDICATED
+  ADJUDICATED
+  VOIDED
+}
+
+enum EraImportStatus {
+  RECEIVED
+  VALIDATION_FAILED
+  VALIDATED
+  RECONCILIATION_READY
+  RECONCILED
+  POSTED
+  VOIDED
+}
+
+enum EraMatchStatus {
+  UNMATCHED
+  PARTIALLY_MATCHED
+  MATCHED
+  EXCEPTION
+  RECONCILED
+}
+
+enum EraExceptionSeverity {
+  INFO
+  WARNING
+  ERROR
+}
+
+enum EraExceptionStatus {
+  OPEN
+  RESOLVED
+  IGNORED
+}
+
 model Practice {
   id        String   @id @default(cuid())
   name      String
@@ -84,6 +123,11 @@ model Practice {
   charges      Charge[]
   adjustments  ChargeAdjustment[]
   payments     Payment[]
+
+  insurancePayers InsurancePayer[]
+  insuranceClaims InsuranceClaim[]
+  eraImports      EraImport[]
+  eraExceptions   EraException[]
 }
 
 model User {
@@ -112,6 +156,9 @@ model User {
   createdPayments  Payment[] @relation("PaymentCreator")
   reviewedPayments Payment[] @relation("PaymentReviewer")
   postedPayments   Payment[] @relation("PaymentPoster")
+
+  importedEraFiles EraImport[] @relation("EraImporter")
+  resolvedEraExceptions EraException[] @relation("EraExceptionResolver")
 }
 
 model Provider {
@@ -145,6 +192,11 @@ model Patient {
   charges      Charge[]
   adjustments  ChargeAdjustment[]
   payments     Payment[]
+
+  insuranceClaims InsuranceClaim[]
+  eraClaims       EraClaim[]
+
+  @@index([practiceId, lastName, firstName])
 }
 
 model Appointment {
@@ -376,6 +428,9 @@ model ChargeLine {
   procedureCode   ProcedureCode    @relation(fields: [procedureCodeId], references: [id])
   feeScheduleItem FeeScheduleItem? @relation(fields: [feeScheduleItemId], references: [id])
 
+  insuranceClaimLines InsuranceClaimLine[]
+  eraServiceLines     EraServiceLine[]
+
   createdAt DateTime @default(now())
 
   @@unique([chargeId, sequence])
@@ -469,4 +524,274 @@ model PaymentAllocation {
 
   @@unique([paymentId, chargeId])
   @@index([chargeId, createdAt])
+}
+
+// -----------------------------------------------------------------------------
+// Insurance payer and internal claim records
+// These records support synthetic claim matching. They do not submit 837 claims.
+// -----------------------------------------------------------------------------
+
+model InsurancePayer {
+  id        String   @id @default(cuid())
+  practiceId String
+  payerCode String
+  name      String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  practice Practice @relation(fields: [practiceId], references: [id])
+  claims   InsuranceClaim[]
+  eraImports EraImport[]
+
+  @@unique([practiceId, payerCode])
+  @@index([practiceId, active, name])
+}
+
+model InsuranceClaim {
+  id                     String               @id @default(cuid())
+  practiceId             String
+  patientId              String
+  payerId                String
+  patientControlNumber   String
+  payerClaimControlNumber String?
+  status                 InsuranceClaimStatus @default(DRAFT)
+  totalBilled            Decimal              @db.Decimal(12, 2)
+  currency               String               @default("USD") @db.VarChar(3)
+  submittedAt            DateTime?
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
+
+  practice Practice       @relation(fields: [practiceId], references: [id])
+  patient  Patient        @relation(fields: [patientId], references: [id])
+  payer    InsurancePayer @relation(fields: [payerId], references: [id])
+
+  lines     InsuranceClaimLine[]
+  eraClaims EraClaim[]
+
+  @@unique([practiceId, patientControlNumber])
+  @@index([practiceId, status, createdAt])
+  @@index([patientId, createdAt])
+  @@index([payerId, payerClaimControlNumber])
+}
+
+model InsuranceClaimLine {
+  id                String   @id @default(cuid())
+  claimId           String
+  chargeLineId      String
+  submittedAmount   Decimal  @db.Decimal(12, 2)
+  units             Decimal? @db.Decimal(10, 3)
+  serviceDateFrom   DateTime?
+  serviceDateThrough DateTime?
+  createdAt         DateTime @default(now())
+
+  claim      InsuranceClaim @relation(fields: [claimId], references: [id])
+  chargeLine ChargeLine     @relation(fields: [chargeLineId], references: [id])
+
+  eraServiceLines EraServiceLine[]
+
+  @@unique([claimId, chargeLineId])
+  @@index([chargeLineId])
+}
+
+// -----------------------------------------------------------------------------
+// 835 remittance import and reconciliation staging
+// Raw source values are retained separately from posted financial transactions.
+// -----------------------------------------------------------------------------
+
+model EraImport {
+  id        String          @id @default(cuid())
+  practiceId String
+  payerId   String?
+  status    EraImportStatus @default(RECEIVED)
+
+  fileName      String
+  fileHash      String
+  rawContent    String      @db.Text
+  parserVersion String?
+
+  interchangeControlNumber String?
+  groupControlNumber       String?
+  transactionControlNumber String?
+
+  senderId   String?
+  receiverId String?
+
+  paymentAmount       Decimal?  @db.Decimal(12, 2)
+  paymentMethodCode   String?
+  paymentEffectiveDate DateTime?
+  traceNumber         String?
+  currency            String    @default("USD") @db.VarChar(3)
+
+  importedById String
+  receivedAt   DateTime @default(now())
+  validatedAt  DateTime?
+  reconciledAt DateTime?
+  postedAt     DateTime?
+  notes        String?  @db.Text
+
+  practice   Practice       @relation(fields: [practiceId], references: [id])
+  payer      InsurancePayer? @relation(fields: [payerId], references: [id])
+  importedBy User           @relation("EraImporter", fields: [importedById], references: [id])
+
+  claims             EraClaim[]
+  providerAdjustments EraProviderAdjustment[]
+  exceptions         EraException[]
+
+  @@unique([practiceId, fileHash])
+  @@index([practiceId, status, receivedAt])
+  @@index([practiceId, traceNumber])
+  @@index([interchangeControlNumber, groupControlNumber, transactionControlNumber])
+}
+
+
+model EraClaim {
+  id         String @id @default(cuid())
+  eraImportId String
+  patientId  String?
+  insuranceClaimId String?
+
+  patientControlNumber    String
+  payerClaimControlNumber String?
+  claimStatusCode         String
+  claimFilingIndicator    String?
+
+  totalChargeAmount          Decimal  @db.Decimal(12, 2)
+  paymentAmount              Decimal  @db.Decimal(12, 2)
+  patientResponsibilityAmount Decimal @default(0) @db.Decimal(12, 2)
+
+  claimReceivedDate DateTime?
+  claimStatementFrom DateTime?
+  claimStatementThrough DateTime?
+
+  matchStatus EraMatchStatus @default(UNMATCHED)
+  matchedAt   DateTime?
+  notes       String? @db.Text
+
+  eraImport      EraImport       @relation(fields: [eraImportId], references: [id])
+  patient        Patient?        @relation(fields: [patientId], references: [id])
+  insuranceClaim InsuranceClaim? @relation(fields: [insuranceClaimId], references: [id])
+
+  serviceLines EraServiceLine[]
+  adjustments  EraAdjustment[]
+  exceptions   EraException[]
+
+  @@index([eraImportId, matchStatus])
+  @@index([patientControlNumber])
+  @@index([payerClaimControlNumber])
+  @@index([insuranceClaimId])
+}
+
+model EraServiceLine {
+  id         String @id @default(cuid())
+  eraClaimId String
+
+  insuranceClaimLineId String?
+  chargeLineId         String?
+
+  procedureIdentifierQualifier String?
+  procedureCode                String?
+  modifiers                    String[] @default([])
+  revenueCode                  String?
+
+  lineChargeAmount   Decimal  @db.Decimal(12, 2)
+  linePaymentAmount  Decimal  @db.Decimal(12, 2)
+  unitsPaid          Decimal? @db.Decimal(10, 3)
+
+  serviceDateFrom DateTime?
+  serviceDateThrough DateTime?
+
+  serviceLineControlNumber String?
+  adjudicationDate DateTime?
+
+  matchStatus EraMatchStatus @default(UNMATCHED)
+  matchedAt   DateTime?
+
+  eraClaim EraClaim @relation(fields: [eraClaimId], references: [id])
+  insuranceClaimLine InsuranceClaimLine? @relation(fields: [insuranceClaimLineId], references: [id])
+  chargeLine ChargeLine? @relation(fields: [chargeLineId], references: [id])
+
+  adjustments EraAdjustment[]
+  exceptions  EraException[]
+
+  @@index([eraClaimId, matchStatus])
+  @@index([procedureCode])
+  @@index([chargeLineId])
+}
+
+model EraAdjustment {
+  id String @id @default(cuid())
+
+  eraClaimId      String
+  eraServiceLineId String?
+
+  adjustmentSequence Int
+  groupCode          String
+  reasonCode         String
+  amount             Decimal  @db.Decimal(12, 2)
+  quantity            Decimal? @db.Decimal(12, 3)
+
+  eraClaim      EraClaim       @relation(fields: [eraClaimId], references: [id])
+  eraServiceLine EraServiceLine? @relation(fields: [eraServiceLineId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([eraClaimId, adjustmentSequence])
+  @@index([eraClaimId, groupCode, reasonCode])
+  @@index([eraServiceLineId])
+}
+
+model EraProviderAdjustment {
+  id String @id @default(cuid())
+
+  eraImportId String
+  adjustmentSequence Int
+
+  providerIdentifierQualifier String?
+  providerIdentifier          String?
+  fiscalPeriodDate             DateTime?
+  reasonCode                   String
+  referenceId                  String?
+  amount                       Decimal @db.Decimal(12, 2)
+
+  eraImport EraImport @relation(fields: [eraImportId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([eraImportId, adjustmentSequence])
+  @@index([eraImportId, reasonCode])
+}
+
+model EraException {
+  id String @id @default(cuid())
+
+  practiceId String
+  eraImportId String
+  eraClaimId String?
+  eraServiceLineId String?
+
+  category String
+  code     String?
+  message  String @db.Text
+
+  severity EraExceptionSeverity @default(WARNING)
+  status   EraExceptionStatus   @default(OPEN)
+
+  resolutionNote String? @db.Text
+  resolvedById   String?
+  resolvedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  practice       Practice        @relation(fields: [practiceId], references: [id])
+  eraImport      EraImport       @relation(fields: [eraImportId], references: [id])
+  eraClaim       EraClaim?       @relation(fields: [eraClaimId], references: [id])
+  eraServiceLine EraServiceLine? @relation(fields: [eraServiceLineId], references: [id])
+  resolvedBy     User?           @relation("EraExceptionResolver", fields: [resolvedById], references: [id])
+
+  @@index([practiceId, status, severity, createdAt])
+  @@index([eraImportId, status])
+  @@index([eraClaimId])
+  @@index([eraServiceLineId])
 }
