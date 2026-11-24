@@ -9,3 +9,16 @@ coverage/
 
 # Official ICD-10 source files (download separately)
 /data/icd10/
+
+# Local environment files and accidental command artifacts
+.env
+.env.*
+!.env.example
+-files .env
+
+# Local Prisma schema backups
+prisma/schema.before-icd10.prisma
+prisma/schema.prisma.backup-before-payments
+
+# TypeScript build metadata
+tsconfig.tsbuildinfo
