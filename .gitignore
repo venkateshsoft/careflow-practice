@@ -6,3 +6,6 @@ node_modules/
 *.log
 coverage/
 .npm-cache/
+
+# Official ICD-10 source files (download separately)
+/data/icd10/

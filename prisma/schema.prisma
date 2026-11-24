@@ -23,69 +23,223 @@ enum AppointmentStatus {
   CANCELLED
 }
 
+enum EncounterStatus {
+  DRAFT
+  IN_PROGRESS
+  SIGNED
+}
+
+enum ChargeStatus {
+  DRAFT
+  POSTED
+  VOIDED
+}
+
+enum AdjustmentType {
+  CREDIT
+  DEBIT
+}
+
+enum AdjustmentStatus {
+  DRAFT
+  POSTED
+  VOIDED
+}
+
+enum PaymentSource {
+  PATIENT
+  INSURANCE
+  OTHER
+}
+
+enum PaymentMethod {
+  CASH
+  CHECK
+  CARD
+  EFT
+  OTHER
+}
+
+enum PaymentStatus {
+  DRAFT
+  POSTED
+  VOIDED
+}
+
 model Practice {
-  id        String      @id @default(cuid())
+  id        String   @id @default(cuid())
   name      String
-  timezone  String      @default("America/New_York")
-  createdAt DateTime    @default(now())
-  users     User[]
-  providers Provider[]
-  patients  Patient[]
-  appointments Appointment[]
-  auditEvents AuditEvent[]
+  timezone  String   @default("America/New_York")
+  createdAt DateTime @default(now())
+
+  users              User[]
+  providers          Provider[]
+  patients           Patient[]
+  appointments       Appointment[]
+  encounters         ClinicalEncounter[]
+  auditEvents        AuditEvent[]
+  encounterDiagnoses EncounterDiagnosis[]
+
+  feeSchedules FeeSchedule[]
+  charges      Charge[]
+  adjustments  ChargeAdjustment[]
+  payments     Payment[]
 }
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  displayName  String
-  role         Role
-  active       Boolean  @default(true)
-  practiceId   String
-  practice     Practice @relation(fields: [practiceId], references: [id])
-  auditEvents  AuditEvent[]
-  createdAt    DateTime @default(now())
+  id          String   @id @default(cuid())
+  email       String   @unique
+  displayName String
+  role        Role
+  active      Boolean  @default(true)
+  practiceId  String
+  createdAt   DateTime @default(now())
+
+  practice          Practice             @relation(fields: [practiceId], references: [id])
+  auditEvents       AuditEvent[]
+  createdEncounters ClinicalEncounter[]  @relation("EncounterAuthor")
+  authoredDiagnoses EncounterDiagnosis[] @relation("DiagnosisAuthor")
+
+  createdCharges  Charge[] @relation("ChargeCreator")
+  reviewedCharges Charge[] @relation("ChargeReviewer")
+  postedCharges   Charge[] @relation("ChargePoster")
+  voidedCharges   Charge[] @relation("ChargeVoider")
+
+  createdAdjustments  ChargeAdjustment[] @relation("AdjustmentCreator")
+  reviewedAdjustments ChargeAdjustment[] @relation("AdjustmentReviewer")
+  postedAdjustments   ChargeAdjustment[] @relation("AdjustmentPoster")
+
+  createdPayments  Payment[] @relation("PaymentCreator")
+  reviewedPayments Payment[] @relation("PaymentReviewer")
+  postedPayments   Payment[] @relation("PaymentPoster")
 }
 
 model Provider {
-  id           String   @id @default(cuid())
-  displayName  String
-  specialty    String
-  credential   String
-  active       Boolean  @default(true)
-  practiceId   String
-  practice     Practice @relation(fields: [practiceId], references: [id])
+  id          String  @id @default(cuid())
+  displayName String
+  specialty   String
+  credential  String
+  active      Boolean @default(true)
+  practiceId  String
+
+  practice     Practice            @relation(fields: [practiceId], references: [id])
   appointments Appointment[]
+  encounters   ClinicalEncounter[]
+  charges      Charge[]
 }
 
 model Patient {
-  id           String   @id @default(cuid())
-  mrn          String   @unique
-  firstName    String
-  lastName     String
-  dateOfBirth  DateTime
-  phone        String
-  status       String   @default("ACTIVE")
-  practiceId   String
-  practice     Practice @relation(fields: [practiceId], references: [id])
+  id          String   @id @default(cuid())
+  mrn         String   @unique
+  firstName   String
+  lastName    String
+  dateOfBirth DateTime
+  phone       String
+  status      String   @default("ACTIVE")
+  practiceId  String
+  createdAt   DateTime @default(now())
+
+  practice     Practice            @relation(fields: [practiceId], references: [id])
   appointments Appointment[]
-  createdAt    DateTime @default(now())
+  encounters   ClinicalEncounter[]
+  charges      Charge[]
+  adjustments  ChargeAdjustment[]
+  payments     Payment[]
 }
 
 model Appointment {
-  id          String   @id @default(cuid())
+  id          String            @id @default(cuid())
   startsAt    DateTime
-  durationMin Int      @default(30)
+  durationMin Int               @default(30)
   visitType   String
   status      AppointmentStatus @default(SCHEDULED)
   patientId   String
-  patient     Patient  @relation(fields: [patientId], references: [id])
   providerId  String
-  provider    Provider @relation(fields: [providerId], references: [id])
   practiceId  String
-  practice    Practice @relation(fields: [practiceId], references: [id])
-  createdAt   DateTime @default(now())
+  createdAt   DateTime          @default(now())
+
+  patient  Patient  @relation(fields: [patientId], references: [id])
+  provider Provider @relation(fields: [providerId], references: [id])
+  practice Practice @relation(fields: [practiceId], references: [id])
+
+  encounter ClinicalEncounter?
+
   @@index([practiceId, startsAt])
+}
+
+model ClinicalEncounter {
+  id            String          @id @default(cuid())
+  appointmentId String          @unique
+  patientId     String
+  providerId    String
+  practiceId    String
+  authorId      String?
+  status        EncounterStatus @default(DRAFT)
+
+  chiefComplaint          String? @db.Text
+  historyOfPresentIllness String? @db.Text
+  reviewOfSystems         String? @db.Text
+  physicalExam            String? @db.Text
+  assessment              String? @db.Text
+  diagnosis               String? @db.Text
+  plan                    String? @db.Text
+
+  vitals Json?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  signedAt  DateTime?
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id])
+  patient     Patient     @relation(fields: [patientId], references: [id])
+  provider    Provider    @relation(fields: [providerId], references: [id])
+  practice    Practice    @relation(fields: [practiceId], references: [id])
+  author      User?       @relation("EncounterAuthor", fields: [authorId], references: [id])
+
+  diagnoses EncounterDiagnosis[]
+  charge    Charge?
+
+  @@index([practiceId, status])
+  @@index([patientId, createdAt])
+  @@index([providerId, createdAt])
+}
+
+model DiagnosisCode {
+  id           String    @id @default(cuid())
+  code         String
+  description  String    @db.Text
+  fiscalYear   Int
+  billable     Boolean   @default(false)
+  validFrom    DateTime
+  validThrough DateTime?
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+
+  encounterDiagnoses EncounterDiagnosis[]
+
+  @@unique([code, fiscalYear])
+  @@index([fiscalYear, code])
+  @@index([fiscalYear, description])
+}
+
+model EncounterDiagnosis {
+  id              String   @id @default(cuid())
+  encounterId     String
+  diagnosisCodeId String
+  sequence        Int
+  practiceId      String
+  addedById       String?
+  createdAt       DateTime @default(now())
+
+  encounter     ClinicalEncounter @relation(fields: [encounterId], references: [id])
+  diagnosisCode DiagnosisCode     @relation(fields: [diagnosisCodeId], references: [id])
+  practice      Practice          @relation(fields: [practiceId], references: [id])
+  addedBy       User?             @relation("DiagnosisAuthor", fields: [addedById], references: [id])
+
+  @@unique([encounterId, diagnosisCodeId])
+  @@unique([encounterId, sequence])
+  @@index([practiceId, encounterId])
+  @@index([diagnosisCodeId])
 }
 
 model AuditEvent {
@@ -96,8 +250,223 @@ model AuditEvent {
   metadata   Json?
   createdAt  DateTime @default(now())
   actorId    String?
-  actor      User?    @relation(fields: [actorId], references: [id])
+  practiceId String
+
+  actor    User?    @relation(fields: [actorId], references: [id])
+  practice Practice @relation(fields: [practiceId], references: [id])
+
+  @@index([practiceId, createdAt])
+}
+
+model ProcedureCode {
+  id               String   @id @default(cuid())
+  code             String   @unique
+  description      String   @db.Text
+  category         String
+  visitTypeMapping String?  @unique
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+
+  feeScheduleItems FeeScheduleItem[]
+  chargeLines      ChargeLine[]
+
+  @@index([isActive, category])
+}
+
+model FeeSchedule {
+  id               String    @id @default(cuid())
+  name             String
+  currency         String    @default("USD") @db.VarChar(3)
+  effectiveFrom    DateTime
+  effectiveThrough DateTime?
+  isActive         Boolean   @default(true)
+
   practiceId String
   practice   Practice @relation(fields: [practiceId], references: [id])
-  @@index([practiceId, createdAt])
+
+  items   FeeScheduleItem[]
+  charges Charge[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([practiceId, isActive])
+  @@index([practiceId, effectiveFrom, effectiveThrough])
+}
+
+model FeeScheduleItem {
+  id              String   @id @default(cuid())
+  feeScheduleId   String
+  procedureCodeId String
+  unitPrice       Decimal  @db.Decimal(12, 2)
+  createdAt       DateTime @default(now())
+
+  feeSchedule   FeeSchedule   @relation(fields: [feeScheduleId], references: [id])
+  procedureCode ProcedureCode @relation(fields: [procedureCodeId], references: [id])
+
+  chargeLines ChargeLine[]
+
+  @@unique([feeScheduleId, procedureCodeId])
+  @@index([procedureCodeId])
+}
+
+model Charge {
+  id            String  @id @default(cuid())
+  encounterId   String  @unique
+  patientId     String
+  providerId    String
+  practiceId    String
+  feeScheduleId String?
+
+  status      ChargeStatus @default(DRAFT)
+  currency    String       @default("USD") @db.VarChar(3)
+  subtotal    Decimal      @db.Decimal(12, 2)
+  totalAmount Decimal      @db.Decimal(12, 2)
+
+  createdById  String
+  reviewedById String?
+  postedById   String?
+  voidedById   String?
+
+  generatedAt DateTime  @default(now())
+  reviewedAt  DateTime?
+  postedAt    DateTime?
+  voidedAt    DateTime?
+
+  notes String? @db.Text
+
+  encounter   ClinicalEncounter @relation(fields: [encounterId], references: [id])
+  patient     Patient           @relation(fields: [patientId], references: [id])
+  provider    Provider          @relation(fields: [providerId], references: [id])
+  practice    Practice          @relation(fields: [practiceId], references: [id])
+  feeSchedule FeeSchedule?      @relation(fields: [feeScheduleId], references: [id])
+
+  createdBy  User  @relation("ChargeCreator", fields: [createdById], references: [id])
+  reviewedBy User? @relation("ChargeReviewer", fields: [reviewedById], references: [id])
+  postedBy   User? @relation("ChargePoster", fields: [postedById], references: [id])
+  voidedBy   User? @relation("ChargeVoider", fields: [voidedById], references: [id])
+
+  lines              ChargeLine[]
+  adjustments        ChargeAdjustment[]
+  paymentAllocations PaymentAllocation[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([practiceId, status, generatedAt])
+  @@index([patientId, generatedAt])
+  @@index([providerId, generatedAt])
+}
+
+model ChargeLine {
+  id                String  @id @default(cuid())
+  chargeId          String
+  procedureCodeId   String
+  feeScheduleItemId String?
+
+  sequence            Int
+  codeSnapshot        String
+  descriptionSnapshot String @db.Text
+
+  units     Int     @default(1)
+  unitPrice Decimal @db.Decimal(12, 2)
+  lineTotal Decimal @db.Decimal(12, 2)
+
+  charge          Charge           @relation(fields: [chargeId], references: [id])
+  procedureCode   ProcedureCode    @relation(fields: [procedureCodeId], references: [id])
+  feeScheduleItem FeeScheduleItem? @relation(fields: [feeScheduleItemId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([chargeId, sequence])
+  @@index([procedureCodeId])
+}
+
+model ChargeAdjustment {
+  id         String @id @default(cuid())
+  chargeId   String
+  practiceId String
+  patientId  String
+
+  type   AdjustmentType
+  status AdjustmentStatus @default(DRAFT)
+
+  amount Decimal @db.Decimal(12, 2)
+  reason String  @db.Text
+  notes  String? @db.Text
+
+  createdById  String
+  reviewedById String?
+  postedById   String?
+
+  createdAt  DateTime  @default(now())
+  reviewedAt DateTime?
+  postedAt   DateTime?
+  voidedAt   DateTime?
+
+  charge   Charge   @relation(fields: [chargeId], references: [id])
+  practice Practice @relation(fields: [practiceId], references: [id])
+  patient  Patient  @relation(fields: [patientId], references: [id])
+
+  createdBy  User  @relation("AdjustmentCreator", fields: [createdById], references: [id])
+  reviewedBy User? @relation("AdjustmentReviewer", fields: [reviewedById], references: [id])
+  postedBy   User? @relation("AdjustmentPoster", fields: [postedById], references: [id])
+
+  @@index([practiceId, status, createdAt])
+  @@index([chargeId, createdAt])
+  @@index([patientId, createdAt])
+}
+
+model Payment {
+  id         String @id @default(cuid())
+  practiceId String
+  patientId  String
+
+  source PaymentSource
+  method PaymentMethod
+  status PaymentStatus @default(DRAFT)
+
+  amount   Decimal @db.Decimal(12, 2)
+  currency String  @default("USD") @db.VarChar(3)
+
+  referenceNumber String?
+  receivedAt      DateTime
+  notes           String?  @db.Text
+
+  createdById  String
+  reviewedById String?
+  postedById   String?
+
+  createdAt  DateTime  @default(now())
+  reviewedAt DateTime?
+  postedAt   DateTime?
+  voidedAt   DateTime?
+
+  practice Practice @relation(fields: [practiceId], references: [id])
+  patient  Patient  @relation(fields: [patientId], references: [id])
+
+  createdBy  User  @relation("PaymentCreator", fields: [createdById], references: [id])
+  reviewedBy User? @relation("PaymentReviewer", fields: [reviewedById], references: [id])
+  postedBy   User? @relation("PaymentPoster", fields: [postedById], references: [id])
+
+  allocations PaymentAllocation[]
+
+  @@index([practiceId, status, receivedAt])
+  @@index([patientId, receivedAt])
+  @@index([referenceNumber])
+}
+
+model PaymentAllocation {
+  id        String @id @default(cuid())
+  paymentId String
+  chargeId  String
+
+  amount    Decimal  @db.Decimal(12, 2)
+  createdAt DateTime @default(now())
+
+  payment Payment @relation(fields: [paymentId], references: [id])
+  charge  Charge  @relation(fields: [chargeId], references: [id])
+
+  @@unique([paymentId, chargeId])
+  @@index([chargeId, createdAt])
 }
