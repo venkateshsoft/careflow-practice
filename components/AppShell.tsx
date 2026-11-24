@@ -1,3 +1,4 @@
+
 import Link from "next/link";
 import { signOut } from "@/app/actions";
 
@@ -20,6 +21,8 @@ export default function AppShell({
   user: { displayName: string; role: string; practice: { name: string } };
   active: string;
 }) {
+  const canAccessEra = ["ADMIN", "BILLING"].includes(user.role);
+
   return (
     <div className="min-h-screen md:flex">
       <aside className="w-full shrink-0 bg-ink p-6 text-white md:min-h-screen md:w-64">
@@ -37,19 +40,29 @@ export default function AppShell({
 
         <nav className="mt-8 space-y-1" aria-label="Main navigation">
           {navigation.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              aria-current={active === item.label ? "page" : undefined}
-              className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition ${
-                active === item.label
-                  ? "bg-teal text-white"
-                  : "text-slate-300 hover:bg-white/10 hover:text-white"
-              }`}
-            >
-              <span aria-hidden="true">{item.icon}</span>
-              {item.label}
-            </Link>
+            <div key={item.href}>
+              <Link
+                href={item.href}
+                aria-current={active === item.label ? "page" : undefined}
+                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition ${
+                  active === item.label
+                    ? "bg-teal text-white"
+                    : "text-slate-300 hover:bg-white/10 hover:text-white"
+                }`}
+              >
+                <span aria-hidden="true">{item.icon}</span>
+                {item.label}
+              </Link>
+
+              {item.label === "Billing" && canAccessEra && (
+                <Link
+                  href="/billing/era"
+                  className="ml-9 mt-1 flex items-center rounded-lg px-3 py-2 text-xs text-slate-300 transition hover:bg-white/10 hover:text-white"
+                >
+                  ERA / 835 Reconciliation
+                </Link>
+              )}
+            </div>
           ))}
         </nav>
 
