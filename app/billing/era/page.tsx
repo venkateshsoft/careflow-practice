@@ -22,11 +22,40 @@ const resultMessages: Record<
       "The 835 file and its parsed records have been saved. No payments or adjustments have been posted.",
     style: "border-emerald-200 bg-emerald-50 text-emerald-800",
   },
+  "matching-complete": {
+    title: "Claim matching completed",
+    message:
+      "Claim matching has completed. Review the claim matches and service-line exceptions. No financial transactions have been posted.",
+    style: "border-emerald-200 bg-emerald-50 text-emerald-800",
+  },
   "invalid-upload": {
     title: "Invalid upload",
     message:
       "Select a file and confirm that it contains synthetic demonstration data.",
     style: "border-red-200 bg-red-50 text-red-800",
+  },
+  "invalid-data": {
+    title: "Invalid request",
+    message: "The ERA import identifier is missing or invalid.",
+    style: "border-red-200 bg-red-50 text-red-800",
+  },
+  "not-found": {
+    title: "ERA import not found",
+    message:
+      "The requested ERA import could not be found for this practice.",
+    style: "border-red-200 bg-red-50 text-red-800",
+  },
+  "already-processed": {
+    title: "Import cannot be matched",
+    message:
+      "This ERA import is already posted or voided and cannot be matched again.",
+    style: "border-amber-200 bg-amber-50 text-amber-800",
+  },
+  "payer-not-assigned": {
+    title: "Payer assignment required",
+    message:
+      "Assign a payer to this ERA import before running claim matching.",
+    style: "border-amber-200 bg-amber-50 text-amber-800",
   },
   "file-too-large": {
     title: "File size limit exceeded",
@@ -215,7 +244,6 @@ export default async function EraImportPage({
 
         <form
           action={importEra835}
-          encType="multipart/form-data"
           className="space-y-6 p-6"
         >
           <div>
@@ -284,6 +312,7 @@ export default async function EraImportPage({
 
           <p className="mt-1 text-sm text-slate-500">
             Latest 50 imported remittance files for this practice.
+            Select a filename to open its reconciliation details.
           </p>
         </div>
 
@@ -318,12 +347,13 @@ export default async function EraImportPage({
                 {imports.map((item) => (
                   <tr key={item.id} className="hover:bg-slate-50">
                     <td className="max-w-64 px-5 py-4">
-                      <div
-                        className="truncate font-semibold"
-                        title={item.fileName}
+                      <Link
+                        href={`/billing/era/${item.id}`}
+                        className="block truncate font-semibold text-teal hover:underline"
+                        title={`Open reconciliation details for ${item.fileName}`}
                       >
                         {item.fileName}
-                      </div>
+                      </Link>
 
                       <div className="mt-1 text-xs text-slate-400">
                         {item.id}
@@ -373,7 +403,7 @@ export default async function EraImportPage({
           <li>• Server-side X12 parsing and transaction validation.</li>
           <li>• Original file retained for audit and later review.</li>
           <li>• Claim and service-line records remain unmatched until reconciliation.</li>
-          <li>• No automatic financial posting during import.</li>
+          <li>• No automatic financial posting during import or matching.</li>
         </ul>
       </div>
 

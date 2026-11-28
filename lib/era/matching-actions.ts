@@ -29,6 +29,7 @@ export async function matchEraImport(formData: FormData) {
   if (!importId) redirect("/billing/era?result=invalid-data");
 
   const result = await db.$transaction(async (tx) => {
+    // Serialize matching attempts for this import.
     const locked = await tx.$queryRaw<Array<{ id: string }>>`
       SELECT "id"
       FROM "EraImport"
@@ -63,6 +64,22 @@ export async function matchEraImport(formData: FormData) {
     }
 
     if (!eraImport.payerId) return "payer-not-assigned";
+
+    // An audit event means a matching attempt has already completed.
+    // This also protects imports that remain VALIDATED due to exceptions.
+    const previousMatchingRun = await tx.auditEvent.findFirst({
+      where: {
+        practiceId: user.practiceId,
+        entityType: "EraImport",
+        entityId: eraImport.id,
+        action: "ERA_CLAIM_MATCHING_COMPLETED",
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (previousMatchingRun) return "matching-already-run";
 
     let matched = 0;
     let partial = 0;
@@ -311,6 +328,7 @@ export async function matchEraImport(formData: FormData) {
       },
     });
 
+    // Persist the completed attempt in the same transaction.
     await tx.auditEvent.create({
       data: {
         action: "ERA_CLAIM_MATCHING_COMPLETED",
@@ -332,6 +350,12 @@ export async function matchEraImport(formData: FormData) {
   });
 
   if (result !== "success") {
+    if (result === "matching-already-run") {
+      redirect(
+        `/billing/era/${importId}?result=matching-already-run`
+      );
+    }
+
     redirect(`/billing/era?result=${result}`);
   }
 

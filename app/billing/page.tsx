@@ -1,4 +1,3 @@
-
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import AppShell from "@/components/AppShell";
@@ -58,6 +57,7 @@ export default async function BillingPage() {
         select: {
           type: true,
           amount: true,
+          reversalOfAdjustmentId: true,
         },
       },
       paymentAllocations: {
@@ -197,7 +197,7 @@ export default async function BillingPage() {
       0
     );
 
-    return total + Math.max(0, payment.amount.toNumber() - allocated);
+    return total + payment.amount.toNumber() - allocated;
   }, 0);
 
   const now = new Date();
@@ -351,6 +351,14 @@ export default async function BillingPage() {
                             {debits > 0 && (
                               <div className="font-medium text-blue-700">
                                 Debit: +{money(debits)}
+                              </div>
+                            )}
+
+                            {charge.adjustments.some(
+                              (adjustment) => Boolean(adjustment.reversalOfAdjustmentId)
+                            ) && (
+                              <div className="font-semibold text-red-700">
+                                Includes ERA adjustment reversal(s)
                               </div>
                             )}
 
@@ -594,7 +602,8 @@ export default async function BillingPage() {
                         0
                       );
 
-                      const unapplied = Math.max(0, amount - allocated);
+                      const unapplied = amount - allocated;
+                       const isReversal = Boolean(payment.reversalOfPaymentId);
 
                       const isReviewed = Boolean(
                         payment.reviewedAt && payment.reviewedById
@@ -640,27 +649,43 @@ export default async function BillingPage() {
                           </td>
 
                           <td className="whitespace-nowrap px-5 py-4 font-semibold">
-                            {money(amount)}
+                            {amount < 0 ? "-" : ""}
+                             {money(Math.abs(amount))}
                           </td>
 
                           <td className="whitespace-nowrap px-5 py-4">
-                            {money(allocated)}
+                            {allocated < 0 ? "-" : ""}
+                             {money(Math.abs(allocated))}
                           </td>
 
                           <td className="whitespace-nowrap px-5 py-4">
                             <span
                               className={
-                                unapplied > 0
-                                  ? "font-semibold text-amber-700"
-                                  : "font-semibold text-emerald-700"
-                              }
-                            >
-                              {money(unapplied)}
+                                 unapplied > 0
+                                   ? "font-semibold text-amber-700"
+                                   : unapplied < 0
+                                     ? "font-semibold text-red-700"
+                                     : "font-semibold text-emerald-700"
+                               }
+                             >
+                               {unapplied < 0 ? "-" : ""}
+                               {money(Math.abs(unapplied))}
                             </span>
                           </td>
 
                           <td className="px-5 py-4">
                             <Status status={payment.status} />
+
+                             {isReversal && (
+                               <div className="mt-2 space-y-1">
+                                 <span className="inline-flex rounded-full bg-red-100 px-2 py-1 text-xs font-semibold text-red-800">
+                                   REVERSAL
+                                 </span>
+                                 <div className="text-xs text-slate-500">
+                                   Reverses: {payment.reversalOfPaymentId}
+                                 </div>
+                               </div>
+                             )}
 
                             {payment.status === "DRAFT" && isReviewed && (
                               <div className="mt-2 text-xs font-medium text-blue-700">
@@ -670,6 +695,15 @@ export default async function BillingPage() {
                           </td>
 
                           <td className="min-w-64 px-5 py-4">
+                            <div className="mb-3">
+                              <Link
+                                href={`/billing/payments/${payment.id}`}
+                                className="font-semibold text-teal hover:underline"
+                              >
+                                View payment details
+                              </Link>
+                            </div>
+
                             {payment.status === "DRAFT" ? (
                               <div className="space-y-2">
                                 {!isReviewed ? (
@@ -732,8 +766,12 @@ export default async function BillingPage() {
                                   </button>
                                 </form>
                               </div>
-                            ) : payment.status === "POSTED" ? (
-                              <div className="space-y-3">
+                            ) : payment.status === "POSTED" && isReversal ? (
+                               <div className="text-xs font-medium text-red-700">
+                                 System-generated reversal. No further actions.
+                               </div>
+                             ) : payment.status === "POSTED" ? (
+                               <div className="space-y-3">
                                 {unapplied > 0 && eligibleCharges.length > 0 ? (
                                   <form
                                     action={allocatePayment}
@@ -828,14 +866,14 @@ export default async function BillingPage() {
           </section>
 
           <div className="mt-4 text-xs text-slate-500">
-            Posted payments: {paymentPosted.length} · Voided payments:{" "}
+            Posted payments: {paymentPosted.length} Â· Voided payments:{" "}
             {paymentVoided.length}
           </div>
         </>
       )}
 
       <p className="mt-8 text-xs text-slate-400">
-        DEMO ENVIRONMENT · Synthetic data only · USD · No live claims,
+        DEMO ENVIRONMENT Â· Synthetic data only Â· USD Â· No live claims,
         payer connections, payment gateways or financial transactions.
       </p>
 

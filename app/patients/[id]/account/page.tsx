@@ -1,4 +1,3 @@
-
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import AppShell from "@/components/AppShell";
@@ -162,8 +161,8 @@ export default async function PatientAccountPage({ params }: PageProps) {
     )
   );
 
-  // Only posted payments and allocations against this patient's posted
-  // charges are included in the account balance.
+  // Include original and reversal payments. Their signed amounts
+  // must both contribute to the account balance.
   const postedPayments = await db.payment.findMany({
     where: {
       patientId: patient.id,
@@ -237,10 +236,10 @@ export default async function PatientAccountPage({ params }: PageProps) {
     0
   );
 
-  const unappliedPayments = Math.max(
-    0,
-    totalPaymentsReceived - totalAllocatedPayments
-  );
+  // Do not clamp this value. A negative result can indicate a
+  // financial inconsistency that should remain visible.
+  const unappliedPayments =
+    totalPaymentsReceived - totalAllocatedPayments;
 
   const outstandingBalance = netCharges - totalAllocatedPayments;
 
@@ -255,40 +254,43 @@ export default async function PatientAccountPage({ params }: PageProps) {
       href: `/billing/${charge.id}` as string | null,
     })),
 
-    ...postedAdjustments
-      .filter((adjustment) => adjustment.type === "CREDIT")
-      .map((adjustment) => ({
-        id: `adjustment-${adjustment.id}`,
-        date: adjustment.postedAt ?? adjustment.createdAt,
-        type: "CREDIT",
-        description: adjustment.reason,
-        reference: adjustment.id,
-        amount: -adjustment.amount.toNumber(),
-        href: `/billing/adjustments/${adjustment.id}` as string | null,
-      })),
+    ...postedAdjustments.map((adjustment) => {
+      const isReversal = Boolean(adjustment.reversalOfAdjustmentId);
 
-    ...postedAdjustments
-      .filter((adjustment) => adjustment.type === "DEBIT")
-      .map((adjustment) => ({
+      return {
         id: `adjustment-${adjustment.id}`,
         date: adjustment.postedAt ?? adjustment.createdAt,
-        type: "DEBIT",
-        description: adjustment.reason,
+        type: isReversal
+          ? `${adjustment.type} REVERSAL`
+          : adjustment.type,
+        description: isReversal
+          ? `Reversal of adjustment ${adjustment.reversalOfAdjustmentId}`
+          : adjustment.reason,
         reference: adjustment.id,
-        amount: adjustment.amount.toNumber(),
+        amount:
+          adjustment.type === "CREDIT"
+            ? -adjustment.amount.toNumber()
+            : adjustment.amount.toNumber(),
         href: `/billing/adjustments/${adjustment.id}` as string | null,
-      })),
+      };
+    }),
 
     ...postedPayments.flatMap((payment) =>
-      payment.allocations.map((allocation) => ({
-        id: `payment-allocation-${allocation.id}`,
-        date: allocation.createdAt,
-        type: "PAYMENT",
-        description: `${payment.source} payment allocation`,
-        reference: payment.id,
-        amount: -allocation.amount.toNumber(),
-        href: null as string | null,
-      }))
+      payment.allocations.map((allocation) => {
+        const isReversal = Boolean(payment.reversalOfPaymentId);
+
+        return {
+          id: `payment-allocation-${allocation.id}`,
+          date: allocation.createdAt,
+          type: isReversal ? "PAYMENT REVERSAL" : "PAYMENT",
+          description: isReversal
+            ? `Reversal of insurance payment ${payment.reversalOfPaymentId}`
+            : `${payment.source} payment allocation`,
+          reference: payment.id,
+          amount: -allocation.amount.toNumber(),
+          href: null as string | null,
+        };
+      })
     ),
   ].sort((a, b) => b.date.getTime() - a.date.getTime());
 
@@ -365,9 +367,23 @@ export default async function PatientAccountPage({ params }: PageProps) {
           <Metric
             label="Unapplied payments"
             value={money(unappliedPayments)}
-            valueClass={unappliedPayments > 0 ? "text-amber-700" : ""}
+            valueClass={
+              unappliedPayments > 0
+                ? "text-amber-700"
+                : unappliedPayments < 0
+                  ? "text-red-700"
+                  : ""
+            }
           />
         </div>
+
+        {unappliedPayments < 0 && (
+          <p className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+            Financial review required: allocated payments exceed net
+            payments received. Please investigate the underlying
+            transactions.
+          </p>
+        )}
 
         <div className="mt-5 rounded-xl border border-teal/30 bg-teal/5 p-5">
           <p className="text-sm font-medium text-slate-600">
@@ -385,8 +401,8 @@ export default async function PatientAccountPage({ params }: PageProps) {
           </p>
 
           <p className="mt-2 text-xs text-slate-500">
-            Net posted charges minus payments allocated to posted charges.
-            Unapplied payment funds do not reduce this balance.
+            Net posted charges minus payments allocated to posted
+            charges. Unapplied payment funds do not reduce this balance.
           </p>
         </div>
 
@@ -421,8 +437,8 @@ export default async function PatientAccountPage({ params }: PageProps) {
           </h2>
 
           <p className="mt-1 text-sm text-slate-500">
-            Posted charges, adjustments and payment allocations, ordered
-            by transaction date.
+            Posted charges, adjustments, payment allocations and
+            reversals, ordered by transaction date.
           </p>
         </div>
 
@@ -460,13 +476,15 @@ export default async function PatientAccountPage({ params }: PageProps) {
                     <td className="px-5 py-4">
                       <span
                         className={`font-semibold ${
-                          transaction.type === "CREDIT"
+                          transaction.type.includes("REVERSAL")
                             ? "text-red-700"
-                            : transaction.type === "PAYMENT"
-                              ? "text-emerald-700"
-                              : transaction.type === "DEBIT"
-                                ? "text-blue-700"
-                                : "text-slate-800"
+                            : transaction.type === "CREDIT"
+                              ? "text-red-700"
+                              : transaction.type === "PAYMENT"
+                                ? "text-emerald-700"
+                                : transaction.type === "DEBIT"
+                                  ? "text-blue-700"
+                                  : "text-slate-800"
                         }`}
                       >
                         {transaction.type}
@@ -510,9 +528,10 @@ export default async function PatientAccountPage({ params }: PageProps) {
         )}
 
         <div className="border-t border-slate-100 bg-slate-50 px-6 py-4 text-xs text-slate-500">
-          Only posted charges, posted adjustments and allocations from
-          posted payments affect the outstanding balance. Draft and
-          voided records are excluded.
+          Reversal entries are displayed separately and retain their
+          signed financial impact. Only posted charges, adjustments and
+          allocations from posted payments affect the outstanding
+          balance. Draft and voided records are excluded.
         </div>
       </section>
 
